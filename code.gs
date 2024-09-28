@@ -1,8 +1,8 @@
 /**
  * トリガーにより自動で実行される関数
  * 処理の流れ
- * - LINEで送るメッセージを作成
- * - LINENotifyAPIでメッセージを送信
+ * - 送信するメッセージを作成
+ * - LINENotifyで送信
  */
 function executeWithTrigger(){
     // 送信するメッセージを作る
@@ -10,16 +10,55 @@ function executeWithTrigger(){
     
     // LINE Notify でメッセージを送信する
     is_successed = sendNotify(message);
-    console.log(is_successed);
+    // console.log(is_successed);
+  }
   
+  /**
+   * 午前4時から5時の間に自動で実行される関数
+   * 処理の流れ
+   * - 本日のイベントをgetEventsFromGCalendar()関数オプション付きで呼び出して取得する
+   * - 送信するメッセージを作成
+   * - LINENotifyで送信
+   */
+  function executeInMorning(){
+    todays_event = getEventsFromGCalendar(true); // 朝自動で行われたという識別のため引数にtrueを指定 2次元配列で取得
+    summary = '\n【自動送信】\n■本日の予定一覧■\n\n';
+    if(todays_event.length == 0){
+      summary += '本日の予定はありません';
+    }else{
+      todays_event.forEach(function(event){
+        // 開始時刻を分解
+        let st_h = ('0' + event[1].getHours()).slice(-2);
+        let st_m = ('0' + event[1].getMinutes()).slice(-2);
+        summary += st_h + ':' + st_m + '~ ' + event[0] + '\n';
+      });
+  
+      // 現在時刻をフォーマット
+      var date = new Date();
+      var year = date.getFullYear().toString().slice(-2); // 年の末尾2桁を取得
+      var month = (date.getMonth() + 1).toString().padStart(2, '0'); // 月を2桁で表示
+      var day = date.getDate().toString().padStart(2, '0'); // 日を2桁で表示
+      var hours = date.getHours().toString().padStart(2, '0'); // 時を2桁で表示
+      var minutes = date.getMinutes().toString().padStart(2, '0'); // 分を2桁で表示
+      var now = `${year}${month}${day}_${hours}${minutes}`;
+  
+      summary += '\n以上 ' + todays_event.length + ' 件（' + now + '時点）';
+    }
+    console.log(summary);
+    result = sendNotify(summary);
   }
   
   /**
    * Googleカレンダーで更新が起きたときに実行される
-   * GoogleカレンダーのカレンダーIDに対応する予定データを取得する関数
-   * 
+   * 処理の流れ
+   * - カレンダーIDから本日の全てのイベントを取得
+   * - GASのトリガー初期化処理
+   * - ｽﾌﾟﾚｯﾄﾞｼｰﾄに書き込むために2次元配列に整形
+   *   ↑ 未来のイベントならばトリガーを作成
+   *   ↑ この関数が実行されたたとき、まもなくイベントが開始するとき、トリガーを作成せずに即時通知を行う
+   * - ｽﾌﾟﾚｯﾄﾞｼｰﾄに書込 ← ｽﾌﾟﾚｯﾄﾞｼｰﾄで管理を行うため（通知済みか否かの確認など）
    */
-  function getEventsFromGCalendar() {
+  function getEventsFromGCalendar(isAuto = false) {
     // ------------------------------
     // ↓ 本日の全てのイベントを取得・保存（イベント毎にトリガーも作成）
     // ------------------------------
@@ -38,8 +77,8 @@ function executeWithTrigger(){
   
     // カレンダーIDを指定してカレンダーを取得（Calendarオブジェクト）
     // const calendar_obj = CalendarApp.getCalendarById(PropertiesService.getScriptProperties().getProperty("GOOGLE_CALENDAR_ID_H"));
-    // const calendar_obj = CalendarApp.getCalendarById(PropertiesService.getScriptProperties().getProperty("GOOGLE_CALENDAR_ID_R"));
-    const calendar_obj = CalendarApp.getCalendarById(PropertiesService.getScriptProperties().getProperty("GOOGLE_CALENDAR_ID_M"));
+    const calendar_obj = CalendarApp.getCalendarById(PropertiesService.getScriptProperties().getProperty("GOOGLE_CALENDAR_ID_R"));
+    // const calendar_obj = CalendarApp.getCalendarById(PropertiesService.getScriptProperties().getProperty("GOOGLE_CALENDAR_ID_M"));
     console.log(calendar_obj);
   
     // 期間を指定してイベントを取得（CalendarEventオブジェクト）
@@ -66,7 +105,7 @@ function executeWithTrigger(){
     // イベントの数が0のとき、配列の.lengthでエラーになるのを防ぐif
     if(events_obj != []){
       var isExistInstanceEvent = false; // 即時通知対象イベントが1つでも存在するかどうか
-      events_obj.forEach(function(event)  {
+      events_obj.forEach(function(event){
         // ------------------------------
         // ↓ イベントの諸情報を変数として取得
         // ------------------------------
@@ -78,7 +117,7 @@ function executeWithTrigger(){
         var trigger_time = '';                // ｽﾌﾟﾚｯﾄﾞｼｰﾄに記述するため空文字で用意（終日イベ）
   
         // ------------------------------
-        // トリガー
+        // 過去のイベント or 未来のイベント or 即時通知
         // ------------------------------
         if(!isAllday){ // 終日予定でない場合のみトリガーを追加
           var now_time = new Date();  // 現在時刻を取得
@@ -106,9 +145,7 @@ function executeWithTrigger(){
           isNoticed = true; // 終日予定の場合予めtrueにしておき通知を行わない。トリガーも作成しない
         }
   
-        // ------------------------------
-        // ↓ 二次元配列に格納
-        // ------------------------------
+        // 二次元配列に格納
         /**
          * 予定のタイトル [string]
          * 予定の開始時刻 [Dateｵﾌﾞｼﾞｪｸﾄ]
@@ -138,20 +175,22 @@ function executeWithTrigger(){
     }
   
     // ------------------------------
-    // ↑ 書込を行ってから、
+    // ↑ 書込を行った後に、
     // ↓ 即時通知対象イベントがある場合、通知を行う
     //   （ｽﾌﾟﾚｯﾄﾞｼｰﾄG列のfalseをsendNotifyでtrueに書き換える）
     // ------------------------------
-    if(isExistInstanceEvent == true){
+    if(isExistInstanceEvent == true){ // フラグを確認
       message = createMessage(true); // 即時通知イベントなので引数にtrueを指定する
       result = sendNotify(message);
       // console.log(result);
     }
   
-    return;
+    if(isAuto){
+      return events_arr; // 本日のイベント全てを2次元配列で返す
+    }else{
+      return;
+    }
   }
-  
-  
   
   
   /**
@@ -162,6 +201,7 @@ function executeWithTrigger(){
    * - 「G列：通知済みか否か」がfalseのものについてデータを変数に格納しループを出る
    * - 変数と、ｽﾌﾟﾚｯﾄﾞｼｰﾄに定義したフォーマットに従いにメッセージを作成
    * - ｽﾌﾟﾚｯﾄﾞｼｰﾄの「G列：通知済みか否か」をtrueに上書き
+   * 注) 最大文字数：トークンの名前で全角7文字を使った場合、残り半角40文字（スマートウォッチの表示領域より）
    * 
    * @param [bool] isInstance = false - 即時通知イベントか否か
    * @returns [string] message - 送信することになるメッセージ
@@ -204,7 +244,7 @@ function executeWithTrigger(){
         let en_m = ('0' + event[2].getMinutes()).slice(-2);
   
         // 開始・終了時刻の整形
-        event_stt = st_h + ':' + st_m; // 開始時刻
+        event_stt = st_h + ':' + st_m; // 開始時刻 例）14:37
         event_end = en_h + ':' + en_m; // 終了時刻
   
         // 予定の長さ計算
@@ -254,7 +294,6 @@ function executeWithTrigger(){
         // ------------------------------
         sh.getRange(2 + i, 7, 1, 1).setValue(true); // iはｲﾝﾃﾞｯｸｽ（行番号-1）なのでカラム名も含め+2が必要 7は通知済みか否かの列番号
   
-  
         break; // 通知済みか否かの部分がfalseの部分が来た時に抜け出す
       }else{
         Logger.log('通知対象でない');
@@ -271,13 +310,11 @@ function executeWithTrigger(){
    * @returns [bool] - 送信に成功したか否か
    */
   function sendNotify(message = "メッセージ送信テストです"){
-    // 最大文字数：トークンの名前で全角7文字を使った場合、残り半角40文字
     try{
       var url = 'https://notify-api.line.me/api/notify';
       var options = {
         'method' : 'post',
         'headers' : {
-          // 'Authorization' : 'Bearer ' + PropertiesService.getScriptProperties().getProperty("LINE_NOTIFY_TOKEN")
           'Authorization' : 'Bearer ' + PropertiesService.getScriptProperties().getProperty("LINE_NOTIFY_TOKEN_GROUP2") // カレンダー通知
         },
         'payload' : {
